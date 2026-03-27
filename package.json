@@ -1,0 +1,18 @@
+{
+  "name": "runshift",
+  "version": "0.0.2",
+  "description": "The control plane for agents, wherever they run.",
+  "main": "index.js",
+  "bin": {
+    "runshift": "index.js"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "cli",
+    "relay",
+    "governance"
+  ],
+  "author": "Devin Crane",
+  "license": "MIT"
+}
