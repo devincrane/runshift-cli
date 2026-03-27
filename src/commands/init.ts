@@ -1,4 +1,5 @@
 import ora from "ora";
+import { execSync } from "node:child_process";
 import { collectRepoContext, addFileToContext } from "../context/collector.js";
 import { getGitState } from "../context/git.js";
 import {
@@ -7,10 +8,12 @@ import {
   showDirtyWarning,
   showBranchInfo,
   showScanResults,
+  showDataPolicy,
   showFindings,
   showFileList,
   showSummary,
   showSuccess,
+  showDryRunComplete,
   showError,
 } from "../ui/display.js";
 import { confirm, promptChoice, promptFilePath } from "../ui/prompt.js";
@@ -24,7 +27,50 @@ const API_URL =
 
 const TIMEOUT_MS = 240_000;
 
-export async function init(): Promise<void> {
+interface InitFlags {
+  dryRun: boolean;
+  branch: string | null;
+  help: boolean;
+}
+
+function parseFlags(args: string[]): InitFlags {
+  const flags: InitFlags = { dryRun: false, branch: null, help: false };
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--dry-run") {
+      flags.dryRun = true;
+    } else if (arg === "--branch") {
+      const next = args[i + 1];
+      flags.branch = next && !next.startsWith("--") ? next : "relay-init";
+      if (next && !next.startsWith("--")) i++;
+    } else if (arg === "--help") {
+      flags.help = true;
+    }
+  }
+
+  return flags;
+}
+
+function showInitHelp(): void {
+  console.log(`
+  npx runshift init [options]
+
+  options:
+    --dry-run        preview changes without writing files
+    --branch <name>  run on a new branch (default: relay-init)
+    --help           show this help
+`);
+}
+
+export async function init(args: string[] = []): Promise<void> {
+  const flags = parseFlags(args);
+
+  if (flags.help) {
+    showInitHelp();
+    return;
+  }
+
   showBanner();
 
   // ── 1. Git safety ─────────────────────────────────────────────────
@@ -45,12 +91,27 @@ export async function init(): Promise<void> {
     }
   }
 
+  // ── 1b. Branch flag — create and switch ───────────────────────────
+  if (flags.branch) {
+    try {
+      execSync(`git rev-parse --verify ${flags.branch}`, { stdio: "pipe" });
+      console.log(`  branch ${flags.branch} already exists.\n`);
+      process.exit(1);
+    } catch {
+      // branch doesn't exist — good
+    }
+
+    execSync(`git checkout -b ${flags.branch}`, { stdio: "pipe" });
+    console.log(`  switched to new branch ${flags.branch}\n`);
+  }
+
   // ── 2. Collect context ────────────────────────────────────────────
   const root = process.cwd();
   const context = collectRepoContext(root);
 
-  // ── 3. Show scan results + prompt ─────────────────────────────────
+  // ── 3. Show scan results + data policy + prompt ───────────────────
   showScanResults(context);
+  showDataPolicy();
 
   let choice = await promptChoice("  proceed? [y] add more files? [a] cancel? [n] ");
 
@@ -63,6 +124,7 @@ export async function init(): Promise<void> {
       }
     }
     showScanResults(context);
+    showDataPolicy();
     choice = await promptChoice("  proceed? [y] add more files? [a] cancel? [n] ");
   }
 
@@ -94,7 +156,7 @@ export async function init(): Promise<void> {
   } catch (err) {
     spinner.stop();
     if (err instanceof Error && err.name === "AbortError") {
-      showError("network", "request timed out after 120s");
+      showError("network", "request timed out after 240s");
     } else {
       showError("network");
     }
@@ -133,13 +195,19 @@ export async function init(): Promise<void> {
   showFindings(data.findings);
   showFileList(data.files);
 
-  // ── 6. Confirm write ──────────────────────────────────────────────
+  // ── 6. Dry run exit ───────────────────────────────────────────────
+  if (flags.dryRun) {
+    showDryRunComplete();
+    return;
+  }
+
+  // ── 7. Confirm write ──────────────────────────────────────────────
   const writeConfirm = await confirm("  write these files? (y/n) ");
   if (!writeConfirm) {
     process.exit(0);
   }
 
-  // ── 7. Re-check git before writing ────────────────────────────────
+  // ── 8. Re-check git before writing ────────────────────────────────
   const gitNow = getGitState();
   if (gitNow.isDirty && !git.isDirty) {
     const proceed = await confirm("  working tree changed since scan — continue? (y/n) ");
@@ -148,7 +216,7 @@ export async function init(): Promise<void> {
     }
   }
 
-  // ── 8. Write + commit ─────────────────────────────────────────────
+  // ── 9. Write + commit ─────────────────────────────────────────────
   console.log();
   writeFiles(root, data.files);
   console.log();
@@ -158,6 +226,6 @@ export async function init(): Promise<void> {
     console.log("  ⚠ files written but git commit failed\n");
   }
 
-  // ── 9. Success ────────────────────────────────────────────────────
+  // ── 10. Success ───────────────────────────────────────────────────
   showSuccess();
 }

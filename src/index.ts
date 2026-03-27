@@ -7,14 +7,14 @@ const command = args[0] ?? "init";
 
 switch (command) {
   case "init":
-    init().catch((err) => {
+    init(args.slice(1)).catch((err) => {
       console.error(err.message ?? err);
       process.exit(1);
     });
     break;
   case "--version":
   case "-v":
-    console.log("runshift 0.0.2");
+    console.log("runshift 0.0.3");
     break;
   case "--help":
   case "-h":
@@ -22,11 +22,15 @@ switch (command) {
   runshift — the control plane for agents, wherever they run.
 
   Usage:
-    npx runshift init    Read your repo, generate governance rules
+    npx runshift init [options]   Read your repo, generate governance rules
 
   Options:
-    --version, -v        Show version
-    --help, -h           Show this help
+    --version, -v                 Show version
+    --help, -h                    Show this help
+
+  Init options:
+    --dry-run                     Preview changes without writing files
+    --branch <name>               Run on a new branch (default: relay-init)
 `);
     break;
   default:

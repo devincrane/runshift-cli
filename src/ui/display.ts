@@ -13,8 +13,9 @@ export function showBanner(): void {
     horizontalLayout: "default",
   });
   console.log(amber(banner));
-  console.log(muted("  v0.0.2"));
-  console.log(muted("  the control plane for agents, wherever they run.\n"));
+  console.log(muted("  v0.0.3"));
+  console.log(muted("  the control plane for agents, wherever they run."));
+  console.log(dim("  usage: npx runshift init [--dry-run] [--branch <name>]\n"));
   console.log(divider + "\n");
 }
 
@@ -140,6 +141,25 @@ export function showSuccess(): void {
   console.log(dim("  → type /runshift-update to refresh rules as your stack evolves\n"));
   console.log(muted("  connect to the runshift control plane: ") + amber("runshift.ai"));
   console.log("\n" + divider + "\n");
+}
+
+export function showDataPolicy(): void {
+  console.log(amber("  relay will send to runshift.ai:\n"));
+  console.log(dim("  ✓ package.json (dependencies and scripts only)"));
+  console.log(dim("  ✓ directory structure (top 2 levels, folder names only)"));
+  console.log(dim("  ✓ .env.example (key names only — values are never read)"));
+  console.log(dim("  ✓ existing CLAUDE.md (if present)"));
+  console.log(dim("  ✓ existing .cursor/rules/ (if present)"));
+  console.log(dim("  ✓ migration file names (no file contents)"));
+  console.log(dim("\n  no source code is sent."));
+  console.log(dim("  no secret values are ever read.\n"));
+}
+
+export function showDryRunComplete(): void {
+  console.log("\n" + divider + "\n");
+  console.log(amber("  dry run complete — no files written."));
+  console.log(dim("  run npx runshift init to install.\n"));
+  console.log(divider + "\n");
 }
 
 export function showError(type: "network" | "rate-limit" | "validation" | "server", message?: string): void {
