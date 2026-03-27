@@ -2,9 +2,14 @@
   "name": "runshift",
   "version": "0.0.2",
   "description": "The control plane for agents, wherever they run.",
-  "main": "index.js",
+  "type": "module",
+  "main": "dist/index.js",
   "bin": {
-    "runshift": "index.js"
+    "runshift": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "ai",
@@ -14,5 +19,18 @@
     "governance"
   ],
   "author": "Devin Crane",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.4.1",
+    "figlet": "^1.8.0",
+    "ora": "^8.2.0"
+  },
+  "devDependencies": {
+    "@types/figlet": "^1.7.0",
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
 }
