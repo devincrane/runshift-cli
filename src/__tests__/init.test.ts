@@ -109,10 +109,19 @@ vi.mock("../writer.js", () => ({
   commitFiles: vi.fn().mockReturnValue(true),
 }));
 
-vi.mock("node:child_process", () => ({
+// Hoisted so mock factories and test bodies share the same references
+// without needing to import from "node:child_process" in the test file.
+// Hoisted so mock factories and test bodies share the same references
+// without needing to import from "node:child_process" in the test file.
+const cpMocks = vi.hoisted(() => ({
   exec: vi.fn(),
   execSync: vi.fn(),
+  spawn: vi.fn(() => ({ unref: vi.fn() })),
+  // status: 0 is the only field checked in commitFiles
+  spawnSync: vi.fn(() => ({ status: 0 as number | null })),
 }));
+
+vi.mock("node:child_process", () => cpMocks);
 
 // ── Stream helpers ────────────────────────────────────────────────────────────
 
@@ -542,22 +551,16 @@ describe("init command — stream reader", () => {
       expect(exitSpy).toHaveBeenCalledWith(1);
     });
 
-    it("stops the spinner before showError on AbortError", async () => {
-      const callOrder: string[] = [];
-      mockSpinner.stop.mockImplementation(() => {
-        callOrder.push("stop");
-      });
-      showError.mockImplementation(() => {
-        callOrder.push("showError");
-      });
-
+    it("does not call spinner.stop() on AbortError (spinner never started before fetch throws)", async () => {
+      // The AbortError is caught before any stream events are processed,
+      // so activeSpinner is null and stop() is never called.
       const abortError = Object.assign(new Error("aborted"), { name: "AbortError" });
       vi.mocked(fetch).mockRejectedValue(abortError);
 
       await expect(init([])).rejects.toThrow("process.exit(1)");
 
-      expect(callOrder[0]).toBe("stop");
-      expect(callOrder[1]).toBe("showError");
+      expect(mockSpinner.stop).not.toHaveBeenCalled();
+      expect(showError).toHaveBeenCalledWith("network", "request timed out after 180s");
     });
 
     it('calls generic showError("network") for non-AbortError fetch failures', async () => {
@@ -580,6 +583,155 @@ describe("init command — stream reader", () => {
       const call = showError.mock.calls[0];
       expect(call).toHaveLength(1);
       expect(call[0]).toBe("network");
+    });
+  });
+
+  // ── Branch name validation — command injection ─────────────────────────────
+
+  describe("branch name validation — command injection", () => {
+    it("rejects branch name containing semicolon before execSync is called", async () => {
+      await expect(init(["--branch", "foo;rm -rf /"])).rejects.toThrow("process.exit(1)");
+
+      expect(cpMocks.execSync).not.toHaveBeenCalled();
+    });
+
+    it("rejects branch name containing backtick before execSync is called", async () => {
+      await expect(init(["--branch", "foo`id`bar"])).rejects.toThrow("process.exit(1)");
+
+      expect(cpMocks.execSync).not.toHaveBeenCalled();
+    });
+
+    it("accepts a valid branch name and proceeds past validation", async () => {
+      // First execSync (git rev-parse) throws → branch doesn't exist → proceed
+      // Second execSync (git checkout -b) returns normally
+      cpMocks.execSync
+        .mockImplementationOnce(() => { throw new Error("not found"); })
+        .mockImplementationOnce(() => undefined as any);
+
+      vi.mocked(fetch).mockResolvedValue(makeStreamResponse([
+        { type: "findings", data: FIXTURE_FINDINGS },
+        { type: "files",    data: FIXTURE_FILES },
+        { type: "summary",  data: "ok" },
+        { type: "done" },
+      ]));
+
+      await init(["--branch", "relay-init", "--dry-run"]);
+
+      // Reaching this line without throwing proves the name passed the regex
+      expect(exitSpy).not.toHaveBeenCalledWith(1);
+    });
+  });
+
+  // ── API response validation ────────────────────────────────────────────────
+
+  describe("API response validation", () => {
+    function streamWith(filesPayload: unknown): Response {
+      return makeStreamResponse([
+        { type: "findings", data: FIXTURE_FINDINGS },
+        { type: "summary",  data: "ok" },
+        { type: "files",    data: filesPayload },
+        { type: "done" },
+      ]);
+    }
+
+    it("rejects a non-array files field", async () => {
+      vi.mocked(fetch).mockResolvedValue(streamWith("not-an-array"));
+
+      await expect(init([])).rejects.toThrow("process.exit(1)");
+
+      expect(showError).toHaveBeenCalledWith("server", "incomplete response from relay");
+    });
+
+    it("rejects a file entry missing the path field", async () => {
+      vi.mocked(fetch).mockResolvedValue(
+        streamWith([{ content: "x", action: "create" }]),
+      );
+
+      await expect(init([])).rejects.toThrow("process.exit(1)");
+
+      expect(showError).toHaveBeenCalledWith("server", "invalid response: file missing path or content");
+    });
+
+    it("rejects a file entry whose path contains '..'", async () => {
+      vi.mocked(fetch).mockResolvedValue(
+        streamWith([{ path: "../../etc/passwd", content: "x", action: "create" }]),
+      );
+
+      await expect(init([])).rejects.toThrow("process.exit(1)");
+
+      expect(showError).toHaveBeenCalledWith(
+        "server",
+        expect.stringContaining("path traversal"),
+      );
+    });
+
+    it("passes validation for a well-formed response and renders the file list", async () => {
+      vi.mocked(fetch).mockResolvedValue(streamWith(FIXTURE_FILES));
+
+      const { showFileList } = await import("../ui/display.js");
+
+      await init(["--dry-run"]);
+
+      expect(vi.mocked(showFileList)).toHaveBeenCalledWith(FIXTURE_FILES);
+    });
+  });
+
+  // ── Open preview — uses spawn not exec ────────────────────────────────────
+
+  describe("open preview — uses spawn not exec", () => {
+    it("calls spawn('open', ...) when user chooses to open preview", async () => {
+      const { promptPreview } = await import("../ui/prompt.js");
+      vi.mocked(promptPreview).mockResolvedValueOnce(true);
+
+      vi.mocked(fetch).mockResolvedValue(makeStreamResponse([
+        { type: "findings",  data: FIXTURE_FINDINGS },
+        { type: "files",     data: FIXTURE_FILES },
+        { type: "summary",   data: "ok" },
+        { type: "previewId", data: "abc-preview-id" },
+        { type: "done" },
+      ]));
+
+      await init(["--dry-run"]);
+
+      expect(cpMocks.spawn).toHaveBeenCalledWith(
+        "open",
+        [expect.stringContaining("abc-preview-id")],
+        expect.objectContaining({ detached: true }),
+      );
+    });
+  });
+
+  // ── DEV mode warning ──────────────────────────────────────────────────────
+
+  describe("DEV mode warning", () => {
+    it("prints dev-mode warning when RUNSHIFT_DEV=true", async () => {
+      const consoleSpy = vi.spyOn(console, "log");
+
+      // IS_DEV is a module-level const — must clear cache and re-import
+      // vi.stubEnv sets the env var and restores it in afterEach automatically
+      vi.stubEnv("RUNSHIFT_DEV", "true");
+      vi.resetModules();
+
+      try {
+        const { init: freshInit } = await import("../commands/init.js");
+
+        // Provide a complete stream so init reaches the banner before any exit
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeStreamResponse([
+          { type: "findings", data: FIXTURE_FINDINGS },
+          { type: "files",    data: FIXTURE_FILES },
+          { type: "summary",  data: "ok" },
+          { type: "done" },
+        ])));
+
+        await freshInit(["--dry-run"]);
+
+        expect(consoleSpy).toHaveBeenCalledWith(
+          expect.stringContaining("dev mode"),
+        );
+      } finally {
+        vi.unstubAllEnvs();
+        consoleSpy.mockRestore();
+      }
     });
   });
 });
