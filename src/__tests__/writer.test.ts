@@ -122,8 +122,8 @@ describe("commitFiles — git add uses spawnSync, git commit uses execFileSync",
   it("does not pass file paths to execFileSync via shell string (no 'git add' in execFileSync calls)", () => {
     commitFiles(ROOT, [{ path: "foo.md", content: "x", action: "create" }]);
 
-    const addViaExec = cpMocks.execFileSync.mock.calls.find(
-      ([cmd, args]: [string, string[]]) => cmd === "git" && Array.isArray(args) && args.includes("add"),
+    const addViaExec = (cpMocks.execFileSync.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === "git" && Array.isArray(args) && args.includes("add"),
     );
     expect(addViaExec).toBeUndefined();
   });
