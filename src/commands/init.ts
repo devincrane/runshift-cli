@@ -327,13 +327,7 @@ export async function init(args: string[] = []): Promise<void> {
   let filesToWrite = data.files;
 
   if (fileChoice === "a") {
-    const preserved = context.protectedPaths.length;
-    if (preserved > 0) {
-      console.log(`\n  relay will write ${data.files.length} files.`);
-      console.log(`  ${preserved} file${preserved === 1 ? " was" : "s were"} preserved (human-written).\n`);
-    } else {
-      console.log(`\n  relay will write all ${data.files.length} files.\n`);
-    }
+    console.log(`\n  relay will write all ${data.files.length} files.\n`);
     const acceptConfirm = await confirm("  confirm? (y/n) ");
     if (!acceptConfirm) {
       showCancelled();
@@ -413,11 +407,30 @@ export async function init(args: string[] = []): Promise<void> {
   }
 
   // ── 11. Write + commit ────────────────────────────────────────────
+  const safeFiles = filesToWrite.filter(
+    (f) => !context.protectedPaths.includes(f.path)
+  );
+
+  if (safeFiles.length < filesToWrite.length) {
+    console.log(amber("  relay preserved your existing files:"));
+    for (const f of filesToWrite) {
+      if (context.protectedPaths.includes(f.path)) {
+        console.log(dim(`  ~ ${f.path} — human-written, not overwritten`));
+      }
+    }
+    console.log(dim("  run npx runshift update to review suggested changes.\n"));
+  }
+
+  if (safeFiles.length === 0) {
+    showCancelled();
+    process.exit(0);
+  }
+
   console.log();
-  writeFiles(root, filesToWrite);
+  writeFiles(root, safeFiles);
   console.log();
 
-  const committed = commitFiles(root, filesToWrite);
+  const committed = commitFiles(root, safeFiles);
   if (!committed) {
     console.log("  ⚠ files written but git commit failed\n");
   }
