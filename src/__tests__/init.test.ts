@@ -701,6 +701,95 @@ describe("init command — stream reader", () => {
     });
   });
 
+  // ── CI file confirmation flow ─────────────────────────────────────────────
+
+  describe("CI file confirmation flow", () => {
+    const CI_FIXTURE_FILES: GeneratedFile[] = [
+      { path: ".github/workflows/ci.yml", content: "on: push", action: "create" },
+      { path: ".cursor/rules/core.mdc",   content: "# rules",  action: "create" },
+    ];
+
+    function makeStreamWithCIFile(): Response {
+      return makeStreamResponse([
+        { type: "findings",  data: FIXTURE_FINDINGS },
+        { type: "files",     data: CI_FIXTURE_FILES },
+        { type: "summary",   data: "ok" },
+        { type: "done" },
+      ]);
+    }
+
+    it("shows CI confirmation prompt when a CI file is included in the file list", async () => {
+      const { promptFileSelection, confirm } = await import("../ui/prompt.js");
+      vi.mocked(promptFileSelection).mockResolvedValueOnce("a");
+      // accept the standard "confirm?" and the CI-specific prompt
+      vi.mocked(confirm).mockResolvedValue(true);
+
+      vi.mocked(fetch).mockResolvedValue(makeStreamWithCIFile());
+
+      // execFileSync: git rev-parse HEAD (manifest write) + git commit --amend
+      cpMocks.execFileSync
+        .mockReturnValueOnce("a".repeat(40))
+        .mockReturnValueOnce(undefined as any);
+
+      await init([]);
+
+      const ciPromptCall = vi.mocked(confirm).mock.calls.find(
+        ([prompt]) => typeof prompt === "string" && prompt.includes("CI configuration file"),
+      );
+      expect(ciPromptCall).toBeDefined();
+      expect(ciPromptCall![0]).toContain(".github/workflows/ci.yml");
+    });
+
+    it("excludes a CI file from filesToWrite when user declines CI confirmation", async () => {
+      const { writeFiles } = await import("../writer.js");
+      const { promptFileSelection, confirm } = await import("../ui/prompt.js");
+      vi.mocked(promptFileSelection).mockResolvedValueOnce("a");
+
+      // Decline CI prompt, accept everything else
+      vi.mocked(confirm).mockImplementation(async (prompt) => {
+        if (typeof prompt === "string" && prompt.includes("CI configuration file")) return false;
+        return true;
+      });
+
+      vi.mocked(fetch).mockResolvedValue(makeStreamWithCIFile());
+
+      cpMocks.execFileSync
+        .mockReturnValueOnce("a".repeat(40))
+        .mockReturnValueOnce(undefined as any);
+
+      await init([]);
+
+      const writtenFiles = (vi.mocked(writeFiles).mock.calls[0][1] as GeneratedFile[]);
+      const paths = writtenFiles.map((f) => f.path);
+      expect(paths).not.toContain(".github/workflows/ci.yml");
+      expect(paths).toContain(".cursor/rules/core.mdc");
+    });
+
+    it("does not show CI prompt for non-CI files", async () => {
+      const { promptFileSelection, confirm } = await import("../ui/prompt.js");
+      vi.mocked(promptFileSelection).mockResolvedValueOnce("a");
+      vi.mocked(confirm).mockResolvedValue(true);
+
+      vi.mocked(fetch).mockResolvedValue(makeStreamResponse([
+        { type: "findings", data: FIXTURE_FINDINGS },
+        { type: "files",    data: FIXTURE_FILES },   // no CI files
+        { type: "summary",  data: "ok" },
+        { type: "done" },
+      ]));
+
+      cpMocks.execFileSync
+        .mockReturnValueOnce("a".repeat(40))
+        .mockReturnValueOnce(undefined as any);
+
+      await init([]);
+
+      const ciPromptCall = vi.mocked(confirm).mock.calls.find(
+        ([prompt]) => typeof prompt === "string" && prompt.includes("CI configuration file"),
+      );
+      expect(ciPromptCall).toBeUndefined();
+    });
+  });
+
   // ── DEV mode warning ──────────────────────────────────────────────────────
 
   describe("DEV mode warning", () => {

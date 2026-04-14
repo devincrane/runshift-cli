@@ -99,6 +99,36 @@ describe("writeFiles — denylist and symlink protection", () => {
       writeFiles(ROOT, [{ path: "nested/package.json", content: "{}", action: "create" }]),
     ).not.toThrow();
   });
+
+  it("throws for .bashrc at repo root", () => {
+    expect(() =>
+      writeFiles(ROOT, [{ path: ".bashrc", content: "export PATH=...", action: "create" }]),
+    ).toThrow("refusing to write to sensitive path");
+  });
+
+  it("throws for .zshrc in a subdirectory", () => {
+    expect(() =>
+      writeFiles(ROOT, [{ path: "home/.zshrc", content: "...", action: "create" }]),
+    ).toThrow("refusing to write to sensitive path");
+  });
+
+  it("throws for .profile at repo root", () => {
+    expect(() =>
+      writeFiles(ROOT, [{ path: ".profile", content: "...", action: "create" }]),
+    ).toThrow("refusing to write to sensitive path");
+  });
+
+  it("throws for Makefile at repo root", () => {
+    expect(() =>
+      writeFiles(ROOT, [{ path: "Makefile", content: "all:\n\techo hi", action: "create" }]),
+    ).toThrow("refusing to write to sensitive path");
+  });
+
+  it("succeeds for Makefile in a subdirectory (not root)", () => {
+    expect(() =>
+      writeFiles(ROOT, [{ path: "scripts/Makefile", content: "all:\n\techo hi", action: "create" }]),
+    ).not.toThrow();
+  });
 });
 
 // ── commitFiles — git add uses spawnSync, git commit uses execFileSync ────────
@@ -117,6 +147,29 @@ describe("commitFiles — git add uses spawnSync, git commit uses execFileSync",
       expect.arrayContaining(["add"]),
       expect.any(Object),
     );
+  });
+
+  it("returns false when spawnSync git add exits with non-zero status", () => {
+    cpMocks.spawnSync.mockReturnValueOnce({ status: 1 });
+
+    const result = commitFiles(ROOT, [{ path: "foo.md", content: "x", action: "create" }]);
+
+    expect(result).toBe(false);
+    expect(cpMocks.execFileSync).not.toHaveBeenCalled();
+  });
+
+  it("returns false when execFileSync git commit throws", () => {
+    cpMocks.execFileSync.mockImplementationOnce(() => { throw new Error("commit failed"); });
+
+    const result = commitFiles(ROOT, [{ path: "foo.md", content: "x", action: "create" }]);
+
+    expect(result).toBe(false);
+  });
+
+  it("returns true on successful add and commit", () => {
+    const result = commitFiles(ROOT, [{ path: "foo.md", content: "x", action: "create" }]);
+
+    expect(result).toBe(true);
   });
 
   it("does not pass file paths to execFileSync via shell string (no 'git add' in execFileSync calls)", () => {
