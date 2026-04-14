@@ -42,18 +42,29 @@ intercept consequential actions before they run.
 
 ## Privacy
 
-The harness reads your repository structure, dependency manifest, environment variable key names, and any existing agent configuration files (CLAUDE.md, .cursor/rules/*) to generate accurate, repo-specific output. No source code files are sent. Nothing collected is stored — it is used only to generate your configuration files and discarded.
+runshift sends the following to runshift.ai during init:
 
-- No secret values read
-- Every file shown before writing
-- You confirm before anything changes
+  ✓ package.json (name, description, dependencies,
+    devDependencies, scripts, workspaces)
+  ✓ tsconfig (target, module, strict, outDir only)
+  ✓ directory structure (top 2 levels, folder names only)
+  ✓ .env.example (key names only — values are never read)
+  ✓ existing CLAUDE.md contents (if present)
+  ✓ existing .cursor/rules/ contents (if present)
+  ✓ migration file names and count (no file contents)
+  ✓ config file names (no file contents)
+  ✓ git branch name and dirty flag
+  ✓ protected path list
+
+No source code is sent. No secret values are ever read.
+Nothing is stored after your session ends.
 
 ## Revert
 
 Everything relay installs is committed with one message:
 
 ```
-chore: install runshift coordination rules
+chore: install runshift agent coordination rules
 ```
 
 Undo instantly:
